@@ -54,7 +54,29 @@
     
     // 9 图文混排部分
 //    CTRunDelegateCallbacks 一共用于保存一个结构体指针/
+    CTRunDelegateCallbacks callbacks;
+    memset(&callbacks, 0, sizeof(CTRunDelegateCallbacks));
+    callbacks.version = kCTRunDelegateVersion1;
+    callbacks.getAscent = ascentCallback;
+    callbacks.getDescent = descentCallback;
+    callbacks.getWidth = widthCallback;
     
+    // 图片信息字典
+    NSDictionary *imgInfoDict = @{@"width":@"200",@"height":@"100"};
+    
+    // 设置 CTRun 的代理
+    CTRunDelegateRef delegate = CTRunDelegateCreate(&callbacks, (__bridge void * _Nullable)(imgInfoDict));
+    
+    // 使用0xFFFC 作为空白的占位符
+    unichar objectReplacementChar = 0xFFFC;
+    NSString *content = [NSString stringWithCharacters:&objectReplacementChar length:1];
+    
+    NSMutableAttributedString *space = [[NSMutableAttributedString alloc]initWithString:content];
+    CFAttributedStringSetAttribute((CFMutableAttributedStringRef)space, CFRangeMake(0, 1), kCTRunDelegateAttributeName, delegate);
+    CFRelease(delegate);
+    
+    // 将创建的空白 attributeString 插入到当前string 中 位置可以随便指定 不能越界
+    [attrString insertAttributedString:space atIndex:50];
     
     
     // 5 根据attr 生成 CTFramesetterRef
@@ -64,15 +86,93 @@
     // 6 进行绘制
     CTFrameDraw(frame, context);
     
+    // 10 绘制图片
+    UIImage *img = [UIImage imageNamed:@"123"];
+    CGContextDrawImage(context, [self calculateImagePositionInCTFrame:frame], img.CGImage);
+    
     // 7 内存管理
     CFRelease(frame);
     CFRelease(path);
     CFRelease(frameSetter);
     
+}
+    // 下面都是第11步
+#pragma mark - CTRun delegate 回调方法
+static CGFloat ascentCallback(void *ref) {
     
-    
-    
+    return [(NSNumber *)[(__bridge NSDictionary *)ref objectForKey:@"height"] floatValue];
 }
 
 
+static CGFloat descentCallback(void *ref) {
+    
+    return 0;
+}
+
+static CGFloat widthCallback(void *ref) {
+    
+    return [(NSNumber *)[(__bridge NSDictionary *)ref objectForKey:@"width"] floatValue];
+}
+
+
+
+
+/**
+ *  根据CTFrameRef获得绘制图片的区域
+ *
+ *  @param ctFrame CTFrameRef对象
+ *
+ *  @return绘制图片的区域
+ */
+- (CGRect)calculateImagePositionInCTFrame:(CTFrameRef)ctFrame {
+    
+    // 获得CTLine数组
+    NSArray *lines = (NSArray *)CTFrameGetLines(ctFrame);
+    NSInteger lineCount = [lines count];
+    CGPoint lineOrigins[lineCount];
+    CTFrameGetLineOrigins(ctFrame, CFRangeMake(0, 0), lineOrigins);
+    
+    // 遍历每个CTLine
+    for (NSInteger i = 0 ; i < lineCount; i++) {
+        
+        CTLineRef line = (__bridge CTLineRef)lines[i];
+        NSArray *runObjArray = (NSArray *)CTLineGetGlyphRuns(line);
+        
+        // 遍历每个CTLine中的CTRun
+        for (id runObj in runObjArray) {
+            
+            CTRunRef run = (__bridge CTRunRef)runObj;
+            NSDictionary *runAttributes = (NSDictionary *)CTRunGetAttributes(run);
+            CTRunDelegateRef delegate = (__bridge CTRunDelegateRef)[runAttributes valueForKey:(id)kCTRunDelegateAttributeName];
+            if (delegate == nil) {
+                continue;
+            }
+            
+            NSDictionary *metaDic = CTRunDelegateGetRefCon(delegate);
+            if (![metaDic isKindOfClass:[NSDictionary class]]) {
+                continue;
+            }
+            
+            CGRect runBounds;
+            CGFloat ascent;
+            CGFloat descent;
+            
+            runBounds.size.width = CTRunGetTypographicBounds(run, CFRangeMake(0, 0), &ascent, &descent, NULL);
+            runBounds.size.height = ascent + descent;
+            
+            CGFloat xOffset = CTLineGetOffsetForStringIndex(line, CTRunGetStringRange(run).location, NULL);
+            runBounds.origin.x = lineOrigins[i].x + xOffset;
+            runBounds.origin.y = lineOrigins[i].y;
+            runBounds.origin.y -= descent;
+            
+            CGPathRef pathRef = CTFrameGetPath(ctFrame);
+            CGRect colRect = CGPathGetBoundingBox(pathRef);
+            
+            CGRect delegateBounds = CGRectOffset(runBounds, colRect.origin.x, colRect.origin.y);
+            return delegateBounds;
+        }
+    }
+    return CGRectZero;
+}
 @end
+
