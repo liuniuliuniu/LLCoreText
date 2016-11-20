@@ -53,7 +53,7 @@
     CFRelease(theParagraphRef);
     
     // 9 图文混排部分
-//    CTRunDelegateCallbacks
+//    CTRunDelegateCallbacks 一共用于保存一个结构体指针/
     
     
     
